@@ -81,6 +81,13 @@ export default {
           busy: "rgb(239 68 68)",
           offline: "rgb(156 163 175)",
         },
+        strength: {
+          "very-weak": "rgb(239 68 68)",
+          "weak": "rgb(249 115 22)",
+          "moderate": "rgb(234 179 8)",
+          "strong": "rgb(34 197 94)",
+          "very-strong": "rgb(16 185 129)",
+        },
       },
       fontFamily: {
         sans: ["var(--font-sans)"],
