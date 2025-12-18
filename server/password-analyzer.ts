@@ -70,7 +70,9 @@ function containsCommonWord(password: string): string | null {
   const deleet = deleetspeakify(password);
   const lower = password.toLowerCase();
   
-  for (const word of COMMON_WORDS) {
+  const words = Array.from(COMMON_WORDS);
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
     if (lower.includes(word) || deleet.includes(word)) {
       return word;
     }
