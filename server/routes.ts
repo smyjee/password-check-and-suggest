@@ -1,15 +1,50 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import OpenAI from "openai";
-import { z } from "zod";
-import { analyzePassword, generateStrongPasswords } from "./password-analyzer";
-import { PasswordEvaluationRequest, ExamplePasswordsRequest } from "@shared/schema";
+import { analyzePassword, generateStrongPasswords, generatePassphrases } from "./password-analyzer";
+import { storage } from "./storage";
+import { 
+  PasswordEvaluationRequest, 
+  ExamplePasswordsRequest,
+  insertApiKeySchema,
+  type RiskLevel
+} from "@shared/schema";
 
 // This is using Replit's AI Integrations service, which provides OpenAI-compatible API access without requiring your own OpenAI API key.
 const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
 });
+
+async function optionalApiKeyAuth(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const key = authHeader.substring(7);
+    const apiKey = await storage.validateApiKey(key);
+    if (apiKey) {
+      await storage.incrementApiKeyUsage(apiKey.id);
+      (req as any).apiKey = apiKey;
+    }
+  }
+  next();
+}
+
+async function requireApiKeyAuth(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "UNAUTHORIZED", message: "API key required" });
+  }
+  
+  const key = authHeader.substring(7);
+  const apiKey = await storage.validateApiKey(key);
+  if (!apiKey) {
+    return res.status(401).json({ error: "INVALID_API_KEY", message: "Invalid or revoked API key" });
+  }
+  
+  await storage.incrementApiKeyUsage(apiKey.id);
+  (req as any).apiKey = apiKey;
+  next();
+}
 
 async function getAISuggestions(password: string, baseAnalysis: ReturnType<typeof analyzePassword>) {
   try {
@@ -91,7 +126,7 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   
-  app.post("/api/evaluate", async (req, res) => {
+  app.post("/api/evaluate", optionalApiKeyAuth, async (req, res) => {
     try {
       const parseResult = PasswordEvaluationRequest.safeParse(req.body);
       
@@ -102,7 +137,7 @@ export async function registerRoutes(
         });
       }
       
-      const { password } = parseResult.data;
+      const { password, riskLevel } = parseResult.data;
       
       if (password.length === 0) {
         return res.status(400).json({ 
@@ -118,7 +153,7 @@ export async function registerRoutes(
         });
       }
       
-      const analysis = analyzePassword(password);
+      const analysis = analyzePassword(password, riskLevel as RiskLevel);
       
       const aiInsights = await getAISuggestions(password, analysis);
       
@@ -134,11 +169,24 @@ export async function registerRoutes(
         });
       }
       
+      try {
+        await storage.recordEvaluation({
+          score: analysis.score,
+          label: analysis.label,
+          riskLevel: riskLevel || "MEDIUM",
+          passwordLength: password.length,
+          hasImproved: false,
+        });
+      } catch (e) {
+        console.error("Failed to record metric:", e);
+      }
+      
       return res.json({
         score: analysis.score,
         label: analysis.label,
         factors: analysis.factors,
         suggestions: analysis.suggestions,
+        entropy: analysis.entropy,
       });
       
     } catch (error) {
@@ -150,7 +198,7 @@ export async function registerRoutes(
     }
   });
   
-  app.post("/api/examples", async (req, res) => {
+  app.post("/api/examples", optionalApiKeyAuth, async (req, res) => {
     try {
       const parseResult = ExamplePasswordsRequest.safeParse(req.body);
       
@@ -161,16 +209,72 @@ export async function registerRoutes(
         });
       }
       
-      const { password, count } = parseResult.data;
+      const { password, count, type } = parseResult.data;
       
-      const examples = await generateAIExamples(password, count);
+      let examples: { password: string; entropy?: number }[];
+      
+      if (type === "passphrase") {
+        const passphrases = generatePassphrases(count);
+        examples = passphrases.map(p => ({ password: p.passphrase, entropy: p.entropy }));
+      } else {
+        const passwords = await generateAIExamples(password, count);
+        examples = passwords.map(p => ({ password: p }));
+      }
       
       return res.json({ examples });
       
     } catch (error) {
       console.error("Example generation error:", error);
       const fallbackExamples = generateStrongPasswords("", 3);
-      return res.json({ examples: fallbackExamples });
+      return res.json({ examples: fallbackExamples.map(p => ({ password: p })) });
+    }
+  });
+  
+  app.get("/api/analytics", async (req, res) => {
+    try {
+      const summary = await storage.getAnalyticsSummary();
+      return res.json(summary);
+    } catch (error) {
+      console.error("Analytics error:", error);
+      return res.status(500).json({ 
+        error: "INTERNAL_ERROR",
+        message: "Failed to fetch analytics"
+      });
+    }
+  });
+  
+  app.post("/api/keys", async (req, res) => {
+    try {
+      const { name } = req.body;
+      if (!name || typeof name !== "string") {
+        return res.status(400).json({ error: "INVALID_REQUEST", message: "Name is required" });
+      }
+      
+      const apiKey = await storage.createApiKey({ name, key: "", isActive: true });
+      return res.json(apiKey);
+    } catch (error) {
+      console.error("API key creation error:", error);
+      return res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to create API key" });
+    }
+  });
+  
+  app.get("/api/keys", async (req, res) => {
+    try {
+      const keys = await storage.getApiKeys();
+      return res.json(keys);
+    } catch (error) {
+      console.error("API keys fetch error:", error);
+      return res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to fetch API keys" });
+    }
+  });
+  
+  app.delete("/api/keys/:id", async (req, res) => {
+    try {
+      await storage.revokeApiKey(req.params.id);
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("API key revocation error:", error);
+      return res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to revoke API key" });
     }
   });
 

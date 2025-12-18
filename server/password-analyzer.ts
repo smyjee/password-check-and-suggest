@@ -1,4 +1,4 @@
-import type { PasswordFactor, PasswordSuggestion, StrengthLabel } from "@shared/schema";
+import type { PasswordFactor, PasswordSuggestion, StrengthLabel, RiskLevel } from "@shared/schema";
 
 const COMMON_PASSWORDS = new Set([
   "password", "123456", "12345678", "qwerty", "abc123", "monkey", "1234567",
@@ -6,6 +6,8 @@ const COMMON_PASSWORDS = new Set([
   "ashley", "bailey", "passw0rd", "shadow", "123123", "654321", "superman",
   "qazwsx", "michael", "football", "password1", "password123", "welcome",
   "jesus", "ninja", "mustang", "password2", "amanda", "admin", "login",
+  "princess", "qwerty123", "1234567890", "letmein123", "admin123", "password!",
+  "changeme", "iloveyou1", "qwertyuiop", "asdfghjkl", "zxcvbnm", "1q2w3e4r",
 ]);
 
 const COMMON_WORDS = new Set([
@@ -14,6 +16,7 @@ const COMMON_WORDS = new Set([
   "soccer", "hockey", "batman", "superman", "spider", "michael", "jennifer",
   "jessica", "ashley", "amanda", "nicole", "daniel", "andrew", "joshua",
   "matthew", "summer", "winter", "spring", "autumn", "monday", "friday",
+  "january", "february", "march", "april", "october", "november", "december",
 ]);
 
 const KEYBOARD_PATTERNS = [
@@ -27,6 +30,17 @@ const LEET_MAP: Record<string, string> = {
   "#": "h", "1": "i", "!": "i", "7": "l", "0": "o", "5": "s", "$": "s",
   "+": "t", "2": "z",
 };
+
+const PASSPHRASE_WORDS = [
+  "correct", "horse", "battery", "staple", "purple", "monkey", "dishwasher",
+  "elephant", "umbrella", "keyboard", "mountain", "river", "forest", "ocean",
+  "thunder", "crystal", "phoenix", "stellar", "quantum", "cosmic", "nebula",
+  "aurora", "glacier", "voltage", "circuit", "photon", "matrix", "cipher",
+  "beacon", "prism", "forge", "ember", "frost", "storm", "drift", "spark",
+  "velvet", "marble", "silver", "golden", "copper", "bronze", "iron", "steel",
+  "rocket", "planet", "comet", "meteor", "galaxy", "cosmic", "solar", "lunar",
+  "meadow", "canyon", "desert", "tundra", "jungle", "savanna", "prairie", "delta",
+];
 
 function deleetspeakify(password: string): string {
   let result = password.toLowerCase();
@@ -91,6 +105,29 @@ function hasLeetSpeak(password: string): boolean {
   return Object.keys(LEET_MAP).some(char => password.includes(char));
 }
 
+function containsDatePattern(password: string): boolean {
+  const datePatterns = [
+    /\b(19|20)\d{2}\b/,
+    /\b\d{2}[-/]\d{2}[-/]\d{2,4}\b/,
+    /\b\d{4}[-/]\d{2}[-/]\d{2}\b/,
+    /\b(0?[1-9]|1[0-2])(0?[1-9]|[12]\d|3[01])\d{2,4}\b/,
+  ];
+  return datePatterns.some(pattern => pattern.test(password));
+}
+
+function containsEmailPattern(password: string): boolean {
+  return /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(password);
+}
+
+function containsPhonePattern(password: string): boolean {
+  const phonePatterns = [
+    /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/,
+    /\b\d{10}\b/,
+    /\b\(\d{3}\)\s?\d{3}[-.]?\d{4}\b/,
+  ];
+  return phonePatterns.some(pattern => pattern.test(password));
+}
+
 function calculateCharacterSetScore(password: string): { score: number; hasLower: boolean; hasUpper: boolean; hasDigit: boolean; hasSymbol: boolean } {
   const hasLower = /[a-z]/.test(password);
   const hasUpper = /[A-Z]/.test(password);
@@ -106,6 +143,12 @@ function calculateCharacterSetScore(password: string): { score: number; hasLower
   return { score, hasLower, hasUpper, hasDigit, hasSymbol };
 }
 
+const RISK_THRESHOLDS: Record<RiskLevel, { minLength: number; minScore: number }> = {
+  LOW: { minLength: 8, minScore: 40 },
+  MEDIUM: { minLength: 12, minScore: 60 },
+  HIGH: { minLength: 16, minScore: 80 },
+};
+
 export interface AnalysisResult {
   score: number;
   label: StrengthLabel;
@@ -114,12 +157,13 @@ export interface AnalysisResult {
   entropy: number;
 }
 
-export function analyzePassword(password: string): AnalysisResult {
+export function analyzePassword(password: string, riskLevel: RiskLevel = "MEDIUM"): AnalysisResult {
   const factors: PasswordFactor[] = [];
   const suggestions: PasswordSuggestion[] = [];
   let score = 0;
   let suggestionId = 1;
   
+  const thresholds = RISK_THRESHOLDS[riskLevel];
   const length = password.length;
   const charset = calculateCharacterSetScore(password);
   const isCommon = isCommonPassword(password);
@@ -128,6 +172,9 @@ export function analyzePassword(password: string): AnalysisResult {
   const hasSequence = hasSequentialChars(password);
   const hasKbPattern = hasKeyboardPattern(password);
   const usesLeet = hasLeetSpeak(password);
+  const hasDate = containsDatePattern(password);
+  const hasEmail = containsEmailPattern(password);
+  const hasPhone = containsPhonePattern(password);
   
   let charsetSize = 0;
   if (charset.hasLower) charsetSize += 26;
@@ -136,19 +183,19 @@ export function analyzePassword(password: string): AnalysisResult {
   if (charset.hasSymbol) charsetSize += 32;
   const entropy = Math.log2(Math.pow(charsetSize || 1, length));
   
-  if (length >= 16) {
+  if (length >= thresholds.minLength + 4) {
     score += 30;
     factors.push({ type: "positive", message: `Excellent length (${length} characters)` });
-  } else if (length >= 12) {
+  } else if (length >= thresholds.minLength) {
     score += 20;
     factors.push({ type: "positive", message: `Good length (${length} characters)` });
-  } else if (length >= 8) {
+  } else if (length >= thresholds.minLength - 4) {
     score += 10;
     factors.push({ type: "negative", message: `Password could be longer (${length} characters)` });
     suggestions.push({
       id: suggestionId++,
       title: "Make it longer",
-      description: "Aim for at least 12-16 characters. Length is one of the most important factors in password strength.",
+      description: `For ${riskLevel.toLowerCase()}-risk accounts, aim for at least ${thresholds.minLength} characters.`,
     });
   } else {
     score += 0;
@@ -156,7 +203,7 @@ export function analyzePassword(password: string): AnalysisResult {
     suggestions.push({
       id: suggestionId++,
       title: "Increase password length",
-      description: "Your password is too short. Use at least 12 characters for better security.",
+      description: `Your password is too short. Use at least ${thresholds.minLength} characters for ${riskLevel.toLowerCase()}-risk accounts.`,
     });
   }
   
@@ -239,6 +286,36 @@ export function analyzePassword(password: string): AnalysisResult {
     });
   }
   
+  if (hasDate) {
+    score -= 10;
+    factors.push({ type: "negative", message: "Contains date pattern" });
+    suggestions.push({
+      id: suggestionId++,
+      title: "Avoid dates",
+      description: "Dates like birthdays or anniversaries are easily guessable personal information.",
+    });
+  }
+  
+  if (hasEmail) {
+    score -= 15;
+    factors.push({ type: "negative", message: "Contains email address" });
+    suggestions.push({
+      id: suggestionId++,
+      title: "Remove email addresses",
+      description: "Never include your email in your password as it's public information.",
+    });
+  }
+  
+  if (hasPhone) {
+    score -= 15;
+    factors.push({ type: "negative", message: "Contains phone number pattern" });
+    suggestions.push({
+      id: suggestionId++,
+      title: "Remove phone numbers",
+      description: "Phone numbers are personal information that attackers can easily discover.",
+    });
+  }
+  
   if (usesLeet && commonWord) {
     factors.push({ type: "negative", message: "Leet speak substitutions are easily cracked" });
     suggestions.push({
@@ -260,11 +337,10 @@ export function analyzePassword(password: string): AnalysisResult {
   score = Math.max(0, Math.min(100, score));
   
   let label: StrengthLabel;
-  if (score >= 80) {
-    label = "VERY_STRONG";
-  } else if (score >= 60) {
-    label = "STRONG";
-  } else if (score >= 40) {
+  if (score >= thresholds.minScore) {
+    if (score >= 80) label = "VERY_STRONG";
+    else label = "STRONG";
+  } else if (score >= thresholds.minScore - 20) {
     label = "MODERATE";
   } else if (score >= 20) {
     label = "WEAK";
@@ -310,4 +386,29 @@ export function generateStrongPasswords(basePattern: string, count: number = 3):
   }
   
   return passwords;
+}
+
+export function generatePassphrases(count: number = 3): { passphrase: string; entropy: number }[] {
+  const passphrases: { passphrase: string; entropy: number }[] = [];
+  const wordCount = 4;
+  const entropyPerWord = Math.log2(PASSPHRASE_WORDS.length);
+  
+  for (let i = 0; i < count; i++) {
+    const selectedWords: string[] = [];
+    for (let j = 0; j < wordCount; j++) {
+      const word = PASSPHRASE_WORDS[Math.floor(Math.random() * PASSPHRASE_WORDS.length)];
+      selectedWords.push(word.charAt(0).toUpperCase() + word.slice(1));
+    }
+    
+    const separators = ["-", ".", "_", " "];
+    const separator = separators[Math.floor(Math.random() * separators.length)];
+    const num = Math.floor(Math.random() * 100);
+    
+    const passphrase = selectedWords.join(separator) + num;
+    const entropy = Math.round(wordCount * entropyPerWord + Math.log2(100));
+    
+    passphrases.push({ passphrase, entropy });
+  }
+  
+  return passphrases;
 }
