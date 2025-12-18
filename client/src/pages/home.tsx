@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { Link } from "wouter";
-import { Lock, Eye, EyeOff, Check, AlertTriangle, Copy, Lightbulb, Shield, Sparkles, ChevronDown, ChevronUp, RefreshCw, Loader2, Key, Zap, BarChart3 } from "lucide-react";
+import { Lock, Eye, EyeOff, Check, AlertTriangle, Copy, Lightbulb, Shield, Sparkles, ChevronDown, ChevronUp, RefreshCw, Loader2, Key, Zap, BarChart3, Search } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -15,22 +15,6 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { PasswordEvaluationResponse, PasswordFactor, PasswordSuggestion, StrengthLabel, RiskLevel } from "@shared/schema";
 import { strengthConfig } from "@shared/schema";
-
-function useDebounce<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = useState<T>(value);
-
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedValue(value);
-    }, delay);
-
-    return () => {
-      clearTimeout(handler);
-    };
-  }, [value, delay]);
-
-  return debouncedValue;
-}
 
 function Header() {
   return (
@@ -403,20 +387,20 @@ interface PasswordInputWidgetProps {
   isLoading: boolean;
   riskLevel: RiskLevel;
   onRiskLevelChange: (level: RiskLevel) => void;
+  onEvaluate: () => void;
 }
 
-function PasswordInputWidget({ password, onPasswordChange, evaluation, isLoading, riskLevel, onRiskLevelChange }: PasswordInputWidgetProps) {
+function PasswordInputWidget({ password, onPasswordChange, evaluation, isLoading, riskLevel, onRiskLevelChange, onEvaluate }: PasswordInputWidgetProps) {
   const [showPassword, setShowPassword] = useState(false);
   
-  const defaultEvaluation: PasswordEvaluationResponse = {
-    score: 0,
-    label: "VERY_WEAK",
-    factors: [],
-    suggestions: [],
-  };
-  
-  const currentEvaluation = evaluation || defaultEvaluation;
   const hasPassword = password.length > 0;
+  const hasEvaluation = evaluation !== null;
+  
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && hasPassword && !isLoading) {
+      onEvaluate();
+    }
+  };
   
   return (
     <Card className="p-6 md:p-8 shadow-lg space-y-6">
@@ -465,6 +449,7 @@ function PasswordInputWidget({ password, onPasswordChange, evaluation, isLoading
               placeholder="Enter your password..."
               value={password}
               onChange={(e) => onPasswordChange(e.target.value)}
+              onKeyDown={handleKeyDown}
               className="h-10 pr-10"
               data-testid="input-password"
               aria-label="Password input"
@@ -485,28 +470,46 @@ function PasswordInputWidget({ password, onPasswordChange, evaluation, isLoading
         </div>
       </div>
       
-      {(hasPassword || isLoading) && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="space-y-6"
-        >
-          <StrengthMeter 
-            score={currentEvaluation.score} 
-            label={currentEvaluation.label}
-            isLoading={isLoading && !evaluation}
-            entropy={currentEvaluation.entropy}
-          />
-          
-          {currentEvaluation.factors.length > 0 && (
-            <FactorAnalysisPanel factors={currentEvaluation.factors} />
-          )}
-          
-          <SuggestionsPanel suggestions={currentEvaluation.suggestions} />
-          
-          {hasPassword && <ExampleGenerator password={password} />}
-        </motion.div>
-      )}
+      <Button
+        onClick={onEvaluate}
+        disabled={!hasPassword || isLoading}
+        className="w-full gap-2"
+        size="lg"
+        data-testid="button-check-password"
+      >
+        {isLoading ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <Search className="h-4 w-4" />
+        )}
+        {isLoading ? "Checking..." : "Check Password Strength"}
+      </Button>
+      
+      <AnimatePresence>
+        {hasEvaluation && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-6"
+          >
+            <StrengthMeter 
+              score={evaluation.score} 
+              label={evaluation.label}
+              isLoading={false}
+              entropy={evaluation.entropy}
+            />
+            
+            {evaluation.factors.length > 0 && (
+              <FactorAnalysisPanel factors={evaluation.factors} />
+            )}
+            
+            <SuggestionsPanel suggestions={evaluation.suggestions} />
+            
+            {hasPassword && <ExampleGenerator password={password} />}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </Card>
   );
 }
@@ -583,8 +586,6 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const [riskLevel, setRiskLevel] = useState<RiskLevel>("MEDIUM");
   const [evaluation, setEvaluation] = useState<PasswordEvaluationResponse | null>(null);
-  const debouncedPassword = useDebounce(password, 300);
-  const debouncedRiskLevel = useDebounce(riskLevel, 300);
   
   const evaluateMutation = useMutation({
     mutationFn: async ({ pwd, risk }: { pwd: string; risk: RiskLevel }) => {
@@ -596,13 +597,11 @@ export default function Home() {
     },
   });
   
-  useEffect(() => {
-    if (debouncedPassword.length > 0) {
-      evaluateMutation.mutate({ pwd: debouncedPassword, risk: debouncedRiskLevel });
-    } else {
-      setEvaluation(null);
+  const handleEvaluate = useCallback(() => {
+    if (password.length > 0) {
+      evaluateMutation.mutate({ pwd: password, risk: riskLevel });
     }
-  }, [debouncedPassword, debouncedRiskLevel]);
+  }, [password, riskLevel, evaluateMutation]);
   
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -617,6 +616,7 @@ export default function Home() {
             isLoading={evaluateMutation.isPending}
             riskLevel={riskLevel}
             onRiskLevelChange={setRiskLevel}
+            onEvaluate={handleEvaluate}
           />
         </div>
       </main>
