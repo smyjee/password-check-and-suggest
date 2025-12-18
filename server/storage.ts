@@ -74,14 +74,14 @@ export class DatabaseStorage implements IStorage {
     const scoreDistribution = Object.entries(labelCounts).map(([label, count]) => ({
       label: label as StrengthLabel,
       count,
-      percentage: totalEvaluations > 0 ? Math.round((count / totalEvaluations) * 100) : 0,
+      percentage: totalEvaluations > 0 ? Number(((count / totalEvaluations) * 100).toFixed(1)) : 0,
     }));
 
     return {
       totalEvaluations,
       scoreDistribution,
-      averageScore: totalEvaluations > 0 ? Math.round(totalScore / totalEvaluations) : 0,
-      improvementRate: totalEvaluations > 0 ? Math.round((improvedCount / totalEvaluations) * 100) : 0,
+      averageScore: totalEvaluations > 0 ? Number((totalScore / totalEvaluations).toFixed(1)) : 0,
+      improvementRate: totalEvaluations > 0 ? Number(((improvedCount / totalEvaluations) * 100).toFixed(1)) : 0,
       evaluationsToday,
       evaluationsThisWeek,
     };

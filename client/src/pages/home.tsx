@@ -1,17 +1,19 @@
 import { useState, useCallback, useEffect } from "react";
-import { Lock, Eye, EyeOff, Check, AlertTriangle, Copy, Lightbulb, Shield, Sparkles, ChevronDown, ChevronUp, RefreshCw, Loader2 } from "lucide-react";
+import { Link } from "wouter";
+import { Lock, Eye, EyeOff, Check, AlertTriangle, Copy, Lightbulb, Shield, Sparkles, ChevronDown, ChevronUp, RefreshCw, Loader2, Key, Zap, BarChart3 } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import type { PasswordEvaluationResponse, PasswordFactor, PasswordSuggestion, StrengthLabel } from "@shared/schema";
+import type { PasswordEvaluationResponse, PasswordFactor, PasswordSuggestion, StrengthLabel, RiskLevel } from "@shared/schema";
 import { strengthConfig } from "@shared/schema";
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -59,9 +61,10 @@ interface StrengthMeterProps {
   score: number;
   label: StrengthLabel;
   isLoading?: boolean;
+  entropy?: number;
 }
 
-function StrengthMeter({ score, label, isLoading }: StrengthMeterProps) {
+function StrengthMeter({ score, label, isLoading, entropy }: StrengthMeterProps) {
   const config = strengthConfig[label];
   
   return (
@@ -79,19 +82,26 @@ function StrengthMeter({ score, label, isLoading }: StrengthMeterProps) {
           </motion.span>
           <span className="text-muted-foreground text-lg">/100</span>
         </div>
-        <motion.div
-          key={label}
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-        >
-          <Badge 
-            variant="outline" 
-            className={`text-base md:text-lg font-semibold px-3 py-1 ${config.color} border-current`}
-            data-testid="badge-strength-label"
+        <div className="flex flex-col items-end gap-1">
+          <motion.div
+            key={label}
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
           >
-            {config.label}
-          </Badge>
-        </motion.div>
+            <Badge 
+              variant="outline" 
+              className={`text-base md:text-lg font-semibold px-3 py-1 ${config.color} border-current`}
+              data-testid="badge-strength-label"
+            >
+              {config.label}
+            </Badge>
+          </motion.div>
+          {entropy !== undefined && (
+            <span className="text-xs text-muted-foreground" data-testid="text-entropy">
+              {entropy.toFixed(1)} bits entropy
+            </span>
+          )}
+        </div>
       </div>
       <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
         <motion.div
@@ -124,9 +134,7 @@ function FactorItem({ factor }: FactorItemProps) {
       }`}>
         {isPositive ? <Check className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
       </div>
-      <span className={`text-sm ${isPositive ? "text-foreground" : "text-muted-foreground"}`}>
-        {factor.message}
-      </span>
+      <span className="text-sm text-muted-foreground">{factor.message}</span>
     </motion.div>
   );
 }
@@ -136,65 +144,70 @@ interface FactorAnalysisPanelProps {
 }
 
 function FactorAnalysisPanel({ factors }: FactorAnalysisPanelProps) {
-  const [isOpen, setIsOpen] = useState(true);
-  
   const positiveFactors = factors.filter(f => f.type === "positive");
   const negativeFactors = factors.filter(f => f.type === "negative");
   
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <CollapsibleTrigger asChild>
-        <Button 
-          variant="ghost" 
-          className="w-full justify-between px-0 font-medium text-sm uppercase tracking-wide"
-          data-testid="button-toggle-factors"
-        >
-          <span>Analysis Details</span>
-          {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-        </Button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="space-y-4 pt-4">
-        {negativeFactors.length > 0 && (
-          <div className="space-y-3" data-testid="list-negative-factors">
-            {negativeFactors.map((factor, idx) => (
-              <FactorItem key={`neg-${idx}`} factor={factor} />
-            ))}
-          </div>
-        )}
-        {positiveFactors.length > 0 && (
-          <div className="space-y-3" data-testid="list-positive-factors">
+    <div className="grid gap-4 sm:grid-cols-2">
+      {positiveFactors.length > 0 && (
+        <div className="space-y-3 p-4 rounded-lg bg-strength-strong/5 border border-strength-strong/20">
+          <h4 className="font-medium text-sm text-strength-strong flex items-center gap-2">
+            <Check className="h-4 w-4" />
+            Strengths
+          </h4>
+          <div className="space-y-2" data-testid="list-positive-factors">
             {positiveFactors.map((factor, idx) => (
-              <FactorItem key={`pos-${idx}`} factor={factor} />
+              <FactorItem key={idx} factor={factor} />
             ))}
           </div>
-        )}
-      </CollapsibleContent>
-    </Collapsible>
+        </div>
+      )}
+      {negativeFactors.length > 0 && (
+        <div className="space-y-3 p-4 rounded-lg bg-strength-very-weak/5 border border-strength-very-weak/20">
+          <h4 className="font-medium text-sm text-strength-very-weak flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4" />
+            Weaknesses
+          </h4>
+          <div className="space-y-2" data-testid="list-negative-factors">
+            {negativeFactors.map((factor, idx) => (
+              <FactorItem key={idx} factor={factor} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
 interface SuggestionCardProps {
   suggestion: PasswordSuggestion;
-  index: number;
 }
 
-function SuggestionCard({ suggestion, index }: SuggestionCardProps) {
+function SuggestionCard({ suggestion }: SuggestionCardProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.1 }}
-      className="flex gap-4 rounded-lg border p-4"
-      data-testid={`card-suggestion-${suggestion.id}`}
-    >
-      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-semibold">
-        {index + 1}
-      </div>
-      <div className="space-y-1">
-        <p className="font-medium text-sm">{suggestion.title}</p>
-        <p className="text-sm text-muted-foreground leading-relaxed">{suggestion.description}</p>
-      </div>
-    </motion.div>
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <CollapsibleTrigger asChild>
+        <button 
+          className="w-full flex items-center justify-between gap-4 p-3 rounded-lg border hover-elevate text-left"
+          data-testid={`suggestion-trigger-${suggestion.id}`}
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <Lightbulb className="h-3.5 w-3.5" />
+            </div>
+            <span className="font-medium text-sm">{suggestion.title}</span>
+          </div>
+          {isOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="px-12 py-2 text-sm text-muted-foreground" data-testid={`suggestion-content-${suggestion.id}`}>
+          {suggestion.description}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -206,14 +219,14 @@ function SuggestionsPanel({ suggestions }: SuggestionsPanelProps) {
   if (suggestions.length === 0) return null;
   
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <Lightbulb className="h-5 w-5 text-strength-moderate" />
-        <h3 className="font-medium text-sm uppercase tracking-wide">Improvement Suggestions</h3>
-      </div>
-      <div className="space-y-3" data-testid="list-suggestions">
-        {suggestions.map((suggestion, idx) => (
-          <SuggestionCard key={suggestion.id} suggestion={suggestion} index={idx} />
+    <div className="space-y-3">
+      <h3 className="font-semibold text-base flex items-center gap-2">
+        <Lightbulb className="h-4 w-4" />
+        Suggestions to Improve
+      </h3>
+      <div className="space-y-2" data-testid="list-suggestions">
+        {suggestions.map(suggestion => (
+          <SuggestionCard key={suggestion.id} suggestion={suggestion} />
         ))}
       </div>
     </div>
@@ -222,10 +235,11 @@ function SuggestionsPanel({ suggestions }: SuggestionsPanelProps) {
 
 interface ExamplePasswordProps {
   password: string;
+  entropy?: number;
   index: number;
 }
 
-function ExamplePassword({ password, index }: ExamplePasswordProps) {
+function ExamplePassword({ password, entropy, index }: ExamplePasswordProps) {
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
   
@@ -248,7 +262,14 @@ function ExamplePassword({ password, index }: ExamplePasswordProps) {
       className="flex items-center justify-between gap-4 rounded-md border p-3 bg-muted/30"
       data-testid={`example-password-${index}`}
     >
-      <code className="font-mono text-sm break-all">{password}</code>
+      <div className="flex-1 min-w-0">
+        <code className="font-mono text-sm break-all">{password}</code>
+        {entropy !== undefined && (
+          <div className="text-xs text-muted-foreground mt-1">
+            {entropy.toFixed(0)} bits entropy
+          </div>
+        )}
+      </div>
       <Button
         variant="ghost"
         size="icon"
@@ -262,19 +283,22 @@ function ExamplePassword({ password, index }: ExamplePasswordProps) {
   );
 }
 
+type GenerationType = "password" | "passphrase";
+
 interface ExampleGeneratorProps {
   password: string;
 }
 
 function ExampleGenerator({ password }: ExampleGeneratorProps) {
-  const [examples, setExamples] = useState<string[]>([]);
+  const [examples, setExamples] = useState<{ password: string; entropy?: number }[]>([]);
   const [isVisible, setIsVisible] = useState(false);
+  const [generationType, setGenerationType] = useState<GenerationType>("password");
   const { toast } = useToast();
   
   const generateMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/examples", { password, count: 3 });
-      return res.json() as Promise<{ examples: string[] }>;
+    mutationFn: async (type: GenerationType) => {
+      const res = await apiRequest("POST", "/api/examples", { password, count: 3, type });
+      return res.json() as Promise<{ examples: { password: string; entropy?: number }[] }>;
     },
     onSuccess: (data) => {
       setExamples(data.examples);
@@ -285,40 +309,51 @@ function ExampleGenerator({ password }: ExampleGeneratorProps) {
     },
   });
   
-  const handleGenerate = () => {
+  const handleGenerate = (type: GenerationType) => {
+    setGenerationType(type);
+    generateMutation.mutate(type);
+  };
+  
+  const handleToggleVisibility = () => {
     if (isVisible) {
       setIsVisible(false);
     } else {
-      generateMutation.mutate();
+      generateMutation.mutate(generationType);
     }
   };
   
   return (
     <div className="space-y-4">
-      <Button
-        variant="outline"
-        onClick={handleGenerate}
-        disabled={generateMutation.isPending || !password}
-        className="w-full gap-2"
-        data-testid="button-generate-examples"
-      >
-        {generateMutation.isPending ? (
-          <>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant={generationType === "password" && isVisible ? "default" : "outline"}
+          onClick={() => handleGenerate("password")}
+          disabled={generateMutation.isPending || !password}
+          className="flex-1 gap-2"
+          data-testid="button-generate-passwords"
+        >
+          {generateMutation.isPending && generationType === "password" ? (
             <Loader2 className="h-4 w-4 animate-spin" />
-            Generating...
-          </>
-        ) : isVisible ? (
-          <>
-            <ChevronUp className="h-4 w-4" />
-            Hide Examples
-          </>
-        ) : (
-          <>
-            <Sparkles className="h-4 w-4" />
-            Show Stronger Password Examples
-          </>
-        )}
-      </Button>
+          ) : (
+            <Key className="h-4 w-4" />
+          )}
+          Strong Passwords
+        </Button>
+        <Button
+          variant={generationType === "passphrase" && isVisible ? "default" : "outline"}
+          onClick={() => handleGenerate("passphrase")}
+          disabled={generateMutation.isPending || !password}
+          className="flex-1 gap-2"
+          data-testid="button-generate-passphrases"
+        >
+          {generateMutation.isPending && generationType === "passphrase" ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Zap className="h-4 w-4" />
+          )}
+          Passphrases
+        </Button>
+      </div>
       
       <AnimatePresence>
         {isVisible && examples.length > 0 && (
@@ -329,20 +364,25 @@ function ExampleGenerator({ password }: ExampleGeneratorProps) {
             className="space-y-3 overflow-hidden"
             data-testid="list-example-passwords"
           >
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm font-medium text-muted-foreground">
+                {generationType === "passphrase" ? "Memorable Passphrases" : "Strong Passwords"}
+              </span>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => generateMutation.mutate(generationType)}
+                disabled={generateMutation.isPending}
+                className="gap-2"
+                data-testid="button-regenerate-examples"
+              >
+                <RefreshCw className={`h-4 w-4 ${generateMutation.isPending ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
+            </div>
             {examples.map((example, idx) => (
-              <ExamplePassword key={idx} password={example} index={idx} />
+              <ExamplePassword key={idx} password={example.password} entropy={example.entropy} index={idx} />
             ))}
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={() => generateMutation.mutate()}
-              disabled={generateMutation.isPending}
-              className="gap-2"
-              data-testid="button-regenerate-examples"
-            >
-              <RefreshCw className={`h-4 w-4 ${generateMutation.isPending ? "animate-spin" : ""}`} />
-              Generate New
-            </Button>
           </motion.div>
         )}
       </AnimatePresence>
@@ -350,14 +390,22 @@ function ExampleGenerator({ password }: ExampleGeneratorProps) {
   );
 }
 
+const RISK_LEVEL_INFO: Record<RiskLevel, { label: string; description: string }> = {
+  LOW: { label: "Low Risk", description: "Personal accounts, forums" },
+  MEDIUM: { label: "Medium Risk", description: "Email, social media" },
+  HIGH: { label: "High Risk", description: "Banking, healthcare" },
+};
+
 interface PasswordInputWidgetProps {
   password: string;
   onPasswordChange: (password: string) => void;
   evaluation: PasswordEvaluationResponse | null;
   isLoading: boolean;
+  riskLevel: RiskLevel;
+  onRiskLevelChange: (level: RiskLevel) => void;
 }
 
-function PasswordInputWidget({ password, onPasswordChange, evaluation, isLoading }: PasswordInputWidgetProps) {
+function PasswordInputWidget({ password, onPasswordChange, evaluation, isLoading, riskLevel, onRiskLevelChange }: PasswordInputWidgetProps) {
   const [showPassword, setShowPassword] = useState(false);
   
   const defaultEvaluation: PasswordEvaluationResponse = {
@@ -380,29 +428,60 @@ function PasswordInputWidget({ password, onPasswordChange, evaluation, isLoading
         </Badge>
       </div>
       
-      <div className="space-y-2">
-        <div className="relative">
-          <Input
-            type={showPassword ? "text" : "password"}
-            placeholder="Enter your password..."
-            value={password}
-            onChange={(e) => onPasswordChange(e.target.value)}
-            className="h-14 md:h-16 text-lg pr-12"
-            data-testid="input-password"
-            aria-label="Password input"
-            autoComplete="off"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="absolute right-2 top-1/2 -translate-y-1/2"
-            onClick={() => setShowPassword(!showPassword)}
-            data-testid="button-toggle-password-visibility"
-            aria-label={showPassword ? "Hide password" : "Show password"}
-          >
-            {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-          </Button>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="risk-level" className="text-sm font-medium">Account Sensitivity</Label>
+          <Select value={riskLevel} onValueChange={(v) => onRiskLevelChange(v as RiskLevel)}>
+            <SelectTrigger id="risk-level" data-testid="select-risk-level">
+              <SelectValue placeholder="Select risk level" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="LOW" data-testid="option-risk-low">
+                <div className="flex flex-col items-start">
+                  <span>{RISK_LEVEL_INFO.LOW.label}</span>
+                </div>
+              </SelectItem>
+              <SelectItem value="MEDIUM" data-testid="option-risk-medium">
+                <div className="flex flex-col items-start">
+                  <span>{RISK_LEVEL_INFO.MEDIUM.label}</span>
+                </div>
+              </SelectItem>
+              <SelectItem value="HIGH" data-testid="option-risk-high">
+                <div className="flex flex-col items-start">
+                  <span>{RISK_LEVEL_INFO.HIGH.label}</span>
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">{RISK_LEVEL_INFO[riskLevel].description}</p>
+        </div>
+        
+        <div className="space-y-2">
+          <Label htmlFor="password-input" className="text-sm font-medium">Password</Label>
+          <div className="relative">
+            <Input
+              id="password-input"
+              type={showPassword ? "text" : "password"}
+              placeholder="Enter your password..."
+              value={password}
+              onChange={(e) => onPasswordChange(e.target.value)}
+              className="h-10 pr-10"
+              data-testid="input-password"
+              aria-label="Password input"
+              autoComplete="off"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="absolute right-0 top-0 h-10 w-10"
+              onClick={() => setShowPassword(!showPassword)}
+              data-testid="button-toggle-password-visibility"
+              aria-label={showPassword ? "Hide password" : "Show password"}
+            >
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </Button>
+          </div>
         </div>
       </div>
       
@@ -416,6 +495,7 @@ function PasswordInputWidget({ password, onPasswordChange, evaluation, isLoading
             score={currentEvaluation.score} 
             label={currentEvaluation.label}
             isLoading={isLoading && !evaluation}
+            entropy={currentEvaluation.entropy}
           />
           
           {currentEvaluation.factors.length > 0 && (
@@ -482,13 +562,17 @@ function Footer() {
         <p className="text-sm text-muted-foreground">
           No passwords stored. All processing happens securely in-memory.
         </p>
-        <div className="mt-4 flex items-center justify-center gap-6 text-sm">
+        <div className="mt-4 flex items-center justify-center gap-6 text-sm flex-wrap">
           <a href="#" className="text-muted-foreground hover:text-foreground transition-colors" data-testid="link-about">
             About
           </a>
           <a href="#" className="text-muted-foreground hover:text-foreground transition-colors" data-testid="link-privacy">
             Privacy Policy
           </a>
+          <Link href="/analytics" className="text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1" data-testid="link-analytics">
+            <BarChart3 className="h-3 w-3" />
+            Analytics
+          </Link>
         </div>
       </div>
     </footer>
@@ -497,12 +581,14 @@ function Footer() {
 
 export default function Home() {
   const [password, setPassword] = useState("");
+  const [riskLevel, setRiskLevel] = useState<RiskLevel>("MEDIUM");
   const [evaluation, setEvaluation] = useState<PasswordEvaluationResponse | null>(null);
   const debouncedPassword = useDebounce(password, 300);
+  const debouncedRiskLevel = useDebounce(riskLevel, 300);
   
   const evaluateMutation = useMutation({
-    mutationFn: async (pwd: string) => {
-      const res = await apiRequest("POST", "/api/evaluate", { password: pwd });
+    mutationFn: async ({ pwd, risk }: { pwd: string; risk: RiskLevel }) => {
+      const res = await apiRequest("POST", "/api/evaluate", { password: pwd, riskLevel: risk });
       return res.json() as Promise<PasswordEvaluationResponse>;
     },
     onSuccess: (data) => {
@@ -512,11 +598,11 @@ export default function Home() {
   
   useEffect(() => {
     if (debouncedPassword.length > 0) {
-      evaluateMutation.mutate(debouncedPassword);
+      evaluateMutation.mutate({ pwd: debouncedPassword, risk: debouncedRiskLevel });
     } else {
       setEvaluation(null);
     }
-  }, [debouncedPassword]);
+  }, [debouncedPassword, debouncedRiskLevel]);
   
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -529,6 +615,8 @@ export default function Home() {
             onPasswordChange={setPassword}
             evaluation={evaluation}
             isLoading={evaluateMutation.isPending}
+            riskLevel={riskLevel}
+            onRiskLevelChange={setRiskLevel}
           />
         </div>
       </main>
