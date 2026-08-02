@@ -1,6 +1,35 @@
-node_modules
-dist
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+server/public/
+.vite/
+
+# Environment variables (you use DATABASE_URL via Neon/Postgres)
+.env
+.env.local
+.env.*.local
+
+# Replit internal state — must not be committed
+.local/
+.replit
+replit.nix
+.upm/
+.cache/
+.config/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / Editor
 .DS_Store
-server/public
-vite.config.ts.*
+Thumbs.db
+.vscode/
+.idea/
+
+# Misc
 *.tar.gz
+vite.config.ts.*
